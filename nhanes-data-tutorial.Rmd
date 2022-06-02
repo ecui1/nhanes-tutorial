@@ -1,0 +1,217 @@
+---
+title: "NHANES Data Tutorial"
+author: "Erjia Cui"
+date: "10/2021"
+output:
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This tutorial illustrates how to start working with data collected from 2003-2004 ("C") and 2005-2006 ("D") waves of National Health and Nutrition Examination Survey (NHANES), one of the largest study conducted by CDC to assess the health and nutritional status of US population. Specifically, we focus on (1) activity count data collected from accelerometers of hip-worn devices (ActiGraph AM-7164), (2) mortality data collected from National Death Index and linked to NHANES, and (3) demographic, survey design, lifestyle, and comorbiditiy data. These data have been processed and stored in the `rnhanesdata` package. The processing pipeline can be found [here](https://andrew-leroux.github.io/rnhanesdata/articles/create-all-processed-data.html).
+
+In this tutorial, we assume that the `rnhanesdata` package has been successfully installed in your working environment. The package installation tutorial can be found [here](https://github.com/andrew-leroux/rnhanesdata). The name of the processed data are listed as follows:
+
+* Activity count data: PAXINTEN_C, PAXINTEN_D, FLAG_C, FLAG_D.
+* Mortality data: Mortality_2015_C, Mortality_2015_D.
+* Demographic, survey design, lifestyle, and comorbiditiy data: Covariate_C, Covariate_D.
+
+For activity count data, "PAXINTEN_\*" are matrices of count values and "FLAG_\*" are the associated wear/non-wear flags. It is worth noting that the wear/non-wear status was classified based on the count values. 
+
+## Load Data
+
+```{r load data, message=FALSE}
+## load package
+library(rnhanesdata)
+```
+
+Since all processed data have been stored in the `rnhanesdata` package, all we need to do is to load this package. We can also download raw data of other categories from [NHANES website](https://www.cdc.gov/nchs/nhanes/index.htm) and combine them with the processed data when needed.
+
+## Check the Data Storage Format
+
+Data collected from C and D waves were processed into exactly the same format, which helps to combine these two waves in the following analysis. This decision was made because these two waves share very similar protocol.
+
+### Activity Count Data
+
+```{r}
+## check the storage format of activity count data
+dim(PAXINTEN_C)
+head(PAXINTEN_C[,1:10], n = 10)
+table(PAXINTEN_C$WEEKDAY)
+dim(PAXINTEN_D)
+table(PAXINTEN_D$WEEKDAY)
+```
+
+There were 7176 participants from C wave and 7455 participants from D wave who wore the device, leading to a total of 14631 study participants. For each eligible study participant, we have 7 consecutive days of activity count data, which can start from any day of the week. Each day is defined as from midnight to midnight. The meaning of each column is explained below:
+
+* `SEQN`: Respondent sequence number (unique identifier).
+* `PAXCAL`: Monitor calibration indicator. `PAXCAL = 1` for calibrated data.
+* `PAXSTAT`: Data reliability status. `PAXSTAT = 1` for data deemed reliable.
+* `WEEKDAY`: Day of the week. `WEEKDAY = 1` for Sunday, `WEEKDAY = 2` for Monday, etc. The start date of wearing the device is not necessarily Sunday.
+* `SDDSRVYR`: Two-year data release cycle number. `SDDSRVYR = 3` for 2003-2004 ("C") wave, and `SDDSRVYR = 4` for 2005-2006 ("D") wave.
+* `MIN*`: Activity count value at each minute of a day. `MIN1`: 12:00AM-12:01AM, etc.
+
+
+### Mortality Data
+
+```{r}
+## check the storage format of mortality data
+dim(Mortality_2015_C)
+head(Mortality_2015_C)
+table(Mortality_2015_C$mortstat)
+dim(Mortality_2015_D)
+table(Mortality_2015_D$mortstat)
+```
+
+The number of rows of mortality data is the sample size of each wave. We have a total of 10122 participants enrolled in C wave and 10348 participants enrolled in D wave, respectively. Notice that not all study participants wore the device, which explains why we only have activity count data from around 71\% of the population in each wave. In addition, not all study participants were linked to mortality data and the eligibility was labeled in the `eligstat` column. The meaning of each column is explained below:
+
+* `SEQN`: Respondent sequence number (unique identifier).
+* `eligstat`: Mortality linkage eligibility. `eligstat = 1` indicates that the survey participant was eligible for the mortality linkage.
+* `mortstat`: Vital status code. `mortstat = 1` if assumed deceased and `mortstat = 0` if assumed alive.
+* `permth_exm`: Person months of follow-up from MEC/Exam date.
+* `permth_int`: Person months of follow-up from interview date.
+* `ucod_leading`: Leading cause of death (code).
+* `diabetes_mcod`: Diabetes flag from multiple cause of death.
+* `hyperten_mcod`: Hypertension flag from multiple cause of death.
+
+
+### Covariate Data
+
+```{r}
+## check the storage format of covariates
+dim(Covariate_C)
+head(Covariate_C)
+dim(Covariate_D)
+```
+
+The number of rows of covariate data is the same as that of mortality data. For some variables we have missing values. The variables can be classified into several categories:
+
+* Demographic data: `SEQN`, `RIDAGEMN`, `RIDAGEEX`, `RIDAGEYR`, `BMI`, `BMI_cat`, `Race`, `Gender`, `EducationAdult`, `MobilityProblem`.
+* Survey design: `SDDSRVYR`, `SDMVPSU`, `SDMVSTRA`, `WTINT2YR`, `WTMEC2YR`.
+* Comorbidity: `Diabetes`, `CHF`, `CHD`, `Cancer`, `Stroke`.
+* Lifestyle: `DrinkStatus`, `DrinksPerWeek`, `SmokeCigs`.
+
+For some demographic and survey design variables with unintuitive capitalized names, we can find their actual meaning on the NHANES website. The meaning of the other columns is easier to understand. It is worth noting that NHANES study has many other types of data that are not limited to those shown above. Other types of data can be downloaded from the website and integrated with existing data using the same processing pipeline.
+
+
+## Data Cleaning
+
+Since the purpose of this tutorial is to show **how to start** working with these large-scale, multilevel, high-dimensional, survey-weighted, and publicly available data, we only show necessary cleaning steps before combining these data into an analyzable format. For different projects, it is recommended to set your own data exclusion criteria and do further data cleaning accordingly.
+
+```{r data cleaning, message=FALSE}
+## load tidyverse package for data cleaning
+library(tidyverse)
+
+## change activity count value under non-wear flags to 0
+PAXINTEN_C[,paste0("MIN",1:1440)] <- PAXINTEN_C[,paste0("MIN",1:1440)]*
+  Flags_C[,paste0("MIN",1:1440)]
+PAXINTEN_D[,paste0("MIN",1:1440)] <- PAXINTEN_D[,paste0("MIN",1:1440)]*
+  Flags_D[,paste0("MIN",1:1440)]
+
+## merge mortality and covariate data
+mort_cov_C <- inner_join(Mortality_2015_C, Covariate_C, by = "SEQN")
+mort_cov_D <- inner_join(Mortality_2015_D, Covariate_D, by = "SEQN")
+
+## combine data collected from two waves
+mort_cov <- bind_rows(mort_cov_C, mort_cov_D)
+act_cnt <- bind_rows(PAXINTEN_C, PAXINTEN_D)
+wear_flag <- bind_rows(Flags_C, Flags_D)
+rm(mort_cov_C, mort_cov_D)
+
+## create Age (in years) using the age at examination
+mort_cov$Age <- mort_cov$RIDAGEEX/12
+```
+
+After these cleaning steps, there remains two major differences between the activity count data and the rest: (1) each row of activity count data is one participant-day, while each row of the other data is one participant; (2) each row of activity count data has minute-level values, which is high-dimensional. While such multilevel, high-dimensional structure itself leads to many interesting statistical research questions, in some other cases people prefer to have simple, participant-level summary measures to work with. 
+
+To solve challenge (2), we follow the literature and create several physical activity summary variables. To solve challenge (1), we compress the activity count data to participant-level by taking the average of (i) activity count value at each minute of a day, and (ii) summary variables, across "good days". A day is defined as an good day if: (i) it has estimated wear time of over 10 hours, (ii) the data are calibrated, and (iii) the data are deemed reliable by NHANES. We also only compress activity count data for participants with at least 3 good days. Notice that the purpose of such compression is to integrate activity count data with other participant-level data so that we have a single data frame with non-redundant information. In other words, not all of the following steps are necessary if we are only interested in the multilevel data. However, it is still recommended to use only "good days" in the multilevel data analysis.
+
+### Further Cleaning of Activity Count Data
+
+```{r}
+## extract count values and flags as matrices
+cnt_mat <- as.matrix(act_cnt[,paste0("MIN",1:1440)])
+flag_mat <- as.matrix(wear_flag[,paste0("MIN",1:1440)])
+
+## replace NAs with 0s
+cnt_mat[is.na(cnt_mat)] <- 0
+flag_mat[is.na(flag_mat)] <- 0
+
+## calculate activity count summary measures
+### total activity count (TAC)
+act_cnt$TAC <- rowSums(cnt_mat)
+### total log activity count (TLAC)
+act_cnt$TLAC <- rowSums(log(1+cnt_mat))
+### total wear time (WT)
+act_cnt$WT <- rowSums(flag_mat)
+### total sedentary time (ST)
+act_cnt$ST <- rowSums(cnt_mat < 100) ## threshold set based on the literature
+### total moderate to vigorous physical activity time (MVPA)
+act_cnt$MVPA <- rowSums(cnt_mat >= 2020) ## threshold set based on the literature
+
+## create "good day" indicator
+act_cnt$goodday <- ifelse(act_cnt$PAXCAL == 1 & act_cnt$PAXSTAT == 1 & 
+                            act_cnt$WT >= 600, 1, 0)
+
+## store the minute-level activity count data as a column of the data frame
+act_cnt$AC <- I(cnt_mat)
+
+## clean the multilevel activity count data
+act_cnt_ml <- act_cnt %>% filter(goodday == 1) %>%
+  select("SEQN", "SDDSRVYR", "WEEKDAY",
+         "AC", "TAC", "TLAC", "ST", "MVPA", "WT",
+         "PAXCAL", "PAXSTAT", "goodday")
+
+## add number of good days for each participant
+act_cnt_ml <- left_join(act_cnt_ml, act_cnt_ml %>% count(SEQN) %>% 
+                        mutate(n_good_days = n) %>% select(SEQN, n_good_days),
+                        by = "SEQN")
+dim(act_cnt_ml)
+str(act_cnt_ml)
+
+rm(act_cnt, wear_flag, cnt_mat, flag_mat)
+```
+
+The data frame `act_cnt_ml` contains cleaned multilevel activity count data in NHANES. This is the data we want to use for **multilevel** statistical modeling.
+
+### Compression of Activity Count Data
+
+```{r}
+## select variables of activity count data to compress
+act_cnt_ml2sl <- act_cnt_ml %>% filter(n_good_days >= 3) %>%
+  select(SEQN, AC, TAC, TLAC, ST, MVPA, WT, n_good_days)
+
+## compress activity count data into participant level
+act_cnt_sl <- aggregate(act_cnt_ml2sl[,3:ncol(act_cnt_ml2sl)], 
+                        list(SEQN = act_cnt_ml2sl$SEQN), mean)
+### for the count value matrix stored in "AC" column, we have to do aggregation manually
+inx_row <- split(1:nrow(act_cnt_ml2sl), f = factor(act_cnt_ml2sl$SEQN))
+act_cnt_sl$AC <- I(t(vapply(inx_row, function(x) 
+                   colMeans(act_cnt_ml2sl$AC[x,,drop=FALSE],na.rm=TRUE),
+                   numeric(ncol(act_cnt_ml2sl$AC)))))
+dim(act_cnt_sl)
+str(act_cnt_sl)
+
+rm(act_cnt_ml2sl, inx_row)
+```
+
+The data frame `act_cnt_sl` contains participant-level activity count data. We next merge activity count data with mortality and covariate data.
+
+```{r}
+## merge activity count data and other data
+data_analysis <- left_join(mort_cov, act_cnt_sl, by = "SEQN")
+dim(data_analysis)
+str(data_analysis)
+```
+
+The data frame `data_analysis` contains cleaned activity count data, mortality data, and covariate data of **all study participants** in the NHANES 2003-2004 ("C") and 2005-2006 ("D") waves. Each row represents one study participant. The proportion of missing data varies by type. For different research questions, it is recommended to set corresponding exclusion criteria. 
+
+The NHANES data is now ready to use. Enjoy!
+
+
